@@ -1,0 +1,8 @@
+.gradle/
+.kotlin/
+app/.cxx/
+.idea/
+local.properties
+**/build/
+app/src/main/assets/ggml-base.bin
+*.apk
