@@ -4,12 +4,16 @@ import android.Manifest
 import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.view.ViewGroup
-import android.widget.Button
+import android.graphics.Typeface
+import android.view.LayoutInflater
+import android.view.View
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -17,65 +21,152 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.DateFormat
+import java.text.NumberFormat
 import java.util.Date
+import java.util.Locale
 
 class MainActivity : Activity() {
+    private enum class Page { HOME, LOG, HISTORY }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val currency = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("en-IN"))
     private lateinit var workflow: FuelWorkflow
-    private lateinit var status: TextView
-    private lateinit var entries: TextView
-    private lateinit var speak: Button
+    private lateinit var container: FrameLayout
+    private var page = Page.HOME
+    private var recording = false
+    private var voiceStatus = "Ready when you are."
+    private var voiceTranscript = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         workflow = FuelWorkflow(this)
-
-        val column = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(32, 32, 32, 32)
+        setContentView(R.layout.activity_main)
+        val root = findViewById<android.view.ViewGroup>(android.R.id.content).getChildAt(0)
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
         }
-        column.addView(TextView(this).apply {
-            text = "Saarthi · offline fuel log"
-            textSize = 24f
-        })
-        column.addView(TextView(this).apply {
-            text = "Say: Petrol 1500 rupees, 14 litres, meter 45200. Recording lasts 6 seconds."
-            textSize = 16f
-        })
-        speak = Button(this).apply {
-            text = "Speak"
-            setOnClickListener { requestMicAndRecord() }
-        }
-        column.addView(speak)
-        status = TextView(this).apply { text = "Ready"; textSize = 16f }
-        column.addView(status)
+        ViewCompat.requestApplyInsets(root)
+        container = findViewById(R.id.screen_container)
+        findViewById<TextView>(R.id.nav_home).setOnClickListener { show(Page.HOME) }
+        findViewById<TextView>(R.id.nav_log).setOnClickListener { show(Page.LOG) }
+        findViewById<TextView>(R.id.nav_history).setOnClickListener { show(Page.HISTORY) }
+        page = savedInstanceState?.getString("page")?.let { runCatching { Page.valueOf(it) }.getOrNull() } ?: Page.HOME
+        show(page)
+    }
 
-        val typed = EditText(this).apply { hint = "Or type a fuel command for testing" }
-        column.addView(typed)
-        column.addView(Button(this).apply {
-            text = "Save typed command"
-            setOnClickListener {
-                val text = typed.text.toString()
-                val command = FuelCommandParser().parse(text)
-                if (command == null) {
-                    status.text = "Could not read amount, litres and meter. Nothing saved."
-                } else {
-                    scope.launch {
-                        withContext(Dispatchers.IO) { FuelStore(this@MainActivity).save(command, text) }
-                        status.text = "Saved ${command.amountRupees.toInt()} rupees, ${command.litres} litres, meter ${command.odometerKm}."
-                        typed.text.clear()
-                        refreshEntries()
-                    }
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("page", page.name)
+        super.onSaveInstanceState(outState)
+    }
+
+    private fun show(destination: Page) {
+        page = destination
+        val layout = when (destination) {
+            Page.HOME -> R.layout.screen_home
+            Page.LOG -> R.layout.screen_log
+            Page.HISTORY -> R.layout.screen_history
+        }
+        container.removeAllViews()
+        val screen = LayoutInflater.from(this).inflate(layout, container, false)
+        container.addView(screen)
+        updateNavigation()
+        when (destination) {
+            Page.HOME -> bindHome(screen)
+            Page.LOG -> bindLog(screen)
+            Page.HISTORY -> bindHistory(screen)
+        }
+    }
+
+    private fun updateNavigation() {
+        for ((id, destination) in listOf(
+            R.id.nav_home to Page.HOME,
+            R.id.nav_log to Page.LOG,
+            R.id.nav_history to Page.HISTORY,
+        )) {
+            val item = findViewById<TextView>(id)
+            val selected = destination == page
+            item.setTextColor(getColor(if (selected) R.color.accent else R.color.muted))
+            item.setTypeface(null, if (selected) Typeface.BOLD else Typeface.NORMAL)
+            item.isSelected = selected
+        }
+    }
+
+    private fun bindHome(screen: View) {
+        screen.findViewById<TextView>(R.id.home_record).setOnClickListener { show(Page.LOG) }
+        screen.findViewById<TextView>(R.id.home_manual).setOnClickListener { show(Page.LOG) }
+        scope.launch {
+            val latest = workflow.recent().firstOrNull()
+            if (page != Page.HOME || container.getChildAt(0) !== screen) return@launch
+            if (latest != null) {
+                screen.findViewById<TextView>(R.id.home_latest_amount).text = currency.format(latest.amountRupees)
+                screen.findViewById<TextView>(R.id.home_latest_detail).text =
+                    "${latest.litres} L  ·  ${latest.odometerKm} km  ·  ${date(latest.savedAtMs)}"
+            }
+        }
+    }
+
+    private fun bindLog(screen: View) {
+        screen.findViewById<TextView>(R.id.record_button).setOnClickListener { requestMicAndRecord() }
+        screen.findViewById<TextView>(R.id.save_manual).setOnClickListener { saveManual(screen) }
+        updateVoiceUi()
+    }
+
+    private fun bindHistory(screen: View) {
+        val list = screen.findViewById<LinearLayout>(R.id.history_list)
+        scope.launch {
+            val entries = workflow.recent()
+            if (page != Page.HISTORY || container.getChildAt(0) !== screen) return@launch
+            if (entries.isEmpty()) {
+                list.addView(TextView(this@MainActivity).apply {
+                    text = "No entries yet. Log your first fill-up to see it here."
+                    setTextColor(getColor(R.color.muted))
+                    textSize = 16f
+                    setPadding(dp(20), dp(24), dp(20), dp(24))
+                    setBackgroundResource(R.drawable.bg_card)
+                })
+            } else {
+                entries.forEach { entry ->
+                    val item = LayoutInflater.from(this@MainActivity)
+                        .inflate(R.layout.item_fuel_entry, list, false)
+                    item.findViewById<TextView>(R.id.entry_date).text = date(entry.savedAtMs)
+                    item.findViewById<TextView>(R.id.entry_amount).text = currency.format(entry.amountRupees)
+                    item.findViewById<TextView>(R.id.entry_detail).text =
+                        "${entry.litres} litres  ·  ${entry.odometerKm} km"
+                    list.addView(item, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
                 }
             }
-        })
-        column.addView(TextView(this).apply { text = "Recent entries"; textSize = 20f })
-        entries = TextView(this)
-        column.addView(entries)
-        setContentView(ScrollView(this).apply {
-            addView(column, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        })
-        refreshEntries()
+        }
+    }
+
+    private fun saveManual(screen: View) {
+        val amount = screen.findViewById<EditText>(R.id.amount_input).text.toString()
+        val litres = screen.findViewById<EditText>(R.id.litres_input).text.toString()
+        val odometer = screen.findViewById<EditText>(R.id.odometer_input).text.toString()
+        val error = screen.findViewById<TextView>(R.id.manual_error)
+        val command = ManualFuelEntry.parse(amount, litres, odometer)
+        if (command == null) {
+            error.text = "Enter a valid amount, litres, and whole-number odometer."
+            error.visibility = View.VISIBLE
+            return
+        }
+        error.visibility = View.GONE
+        val save = screen.findViewById<TextView>(R.id.save_manual)
+        save.isEnabled = false
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    FuelStore(this@MainActivity).use { it.save(command, "Manual entry") }
+                }
+                Toast.makeText(this@MainActivity, "Fuel entry saved", Toast.LENGTH_SHORT).show()
+                show(Page.HOME)
+            } catch (exception: Exception) {
+                error.text = exception.message ?: "Could not save entry. Try again."
+                error.visibility = View.VISIBLE
+                save.isEnabled = true
+            }
+        }
     }
 
     private fun requestMicAndRecord() {
@@ -83,40 +174,55 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
             return
         }
-        speak.isEnabled = false
-        status.text = "Listening for 6 seconds…"
+        if (recording) return
+        recording = true
+        voiceStatus = "Listening for 6 seconds…"
+        voiceTranscript = ""
+        updateVoiceUi()
         scope.launch {
             try {
                 val samples = AudioCapture.phone()
-                status.text = "Transcribing offline…"
+                voiceStatus = "Transcribing offline…"
+                updateVoiceUi()
                 val result = workflow.process(samples)
-                status.text = "${result.message}\nHeard: ${result.transcript}"
-                refreshEntries()
-            } catch (error: Exception) {
-                status.text = error.message ?: "Recording failed"
+                voiceStatus = result.message
+                voiceTranscript = result.transcript
+            } catch (exception: Exception) {
+                voiceStatus = exception.message ?: "Recording failed. Try again."
             } finally {
-                speak.isEnabled = true
+                recording = false
+                if (page == Page.LOG) updateVoiceUi() else show(page)
             }
+        }
+    }
+
+    private fun updateVoiceUi() {
+        if (page != Page.LOG) return
+        val button = container.findViewById<TextView>(R.id.record_button)
+        button.isEnabled = !recording
+        button.alpha = if (recording) 0.65f else 1f
+        button.text = if (recording) "Recording…" else "Start 6-second recording"
+        container.findViewById<TextView>(R.id.record_status).text = voiceStatus
+        container.findViewById<TextView>(R.id.record_transcript).apply {
+            visibility = if (voiceTranscript.isBlank()) View.GONE else View.VISIBLE
+            text = "Heard: $voiceTranscript"
         }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 1 && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-            requestMicAndRecord()
-        } else {
-            status.text = "Microphone permission is needed for voice logging."
+        if (requestCode != 1) return
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) requestMicAndRecord()
+        else {
+            voiceStatus = "Microphone permission is needed for voice logging."
+            updateVoiceUi()
         }
     }
 
-    private fun refreshEntries() {
-        scope.launch {
-            val recent = workflow.recent()
-            entries.text = if (recent.isEmpty()) "No fuel entries yet" else recent.joinToString("\n\n") {
-                "${DateFormat.getDateTimeInstance().format(Date(it.savedAtMs))}\n₹${it.amountRupees} · ${it.litres} L · ${it.odometerKm} km"
-            }
-        }
-    }
+    private fun date(timestamp: Long): String =
+        DateFormat.getDateInstance(DateFormat.MEDIUM, Locale.forLanguageTag("en-IN")).format(Date(timestamp))
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     override fun onDestroy() {
         scope.cancel()

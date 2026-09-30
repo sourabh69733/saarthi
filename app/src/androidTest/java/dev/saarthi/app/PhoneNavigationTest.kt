@@ -1,0 +1,50 @@
+package dev.saarthi.app
+
+import android.content.Intent
+import android.view.View
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class PhoneNavigationTest {
+    @Test fun contentStartsBelowStatusBar() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = instrumentation.startActivitySync(
+            Intent(instrumentation.targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        ) as MainActivity
+        try {
+            val root = activity.findViewById<android.view.ViewGroup>(android.R.id.content).getChildAt(0)
+            val statusBar = ViewCompat.getRootWindowInsets(root)
+                ?.getInsets(WindowInsetsCompat.Type.statusBars())?.top ?: 0
+            assertTrue("root padding ${root.paddingTop} must clear status bar $statusBar", root.paddingTop >= statusBar)
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+
+    @Test fun homeCanOpenLogAndHistoryScreens() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val intent = Intent(instrumentation.targetContext, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val activity = instrumentation.startActivitySync(intent) as MainActivity
+        try {
+            assertNotNull(activity.findViewById<View>(android.R.id.content).findViewWithTag<View>("home_screen"))
+            instrumentation.runOnMainSync {
+                activity.findViewById<View>(android.R.id.content).findViewWithTag<View>("log_nav").performClick()
+            }
+            assertNotNull(activity.findViewById<View>(android.R.id.content).findViewWithTag<View>("log_screen"))
+            instrumentation.runOnMainSync {
+                activity.findViewById<View>(android.R.id.content).findViewWithTag<View>("history_nav").performClick()
+            }
+            assertNotNull(activity.findViewById<View>(android.R.id.content).findViewWithTag<View>("history_screen"))
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+}

@@ -1,6 +1,6 @@
 # Saarthi
 
-Personal Android Auto prototype for offline fuel logging. Say a short command such as “Petrol 1500 rupees, 14 litres, meter 45200”. The phone runs Whisper locally, parses the three values, and saves them in a local SQLite database. The phone screen also accepts a typed command so the parser can be tested without driving.
+Personal Android Auto prototype for offline fuel logging. Say a short command such as “Petrol 1500 rupees, 14 litres, meter 45200”. The phone runs Whisper locally, parses the three values, and saves them in a local SQLite database. The phone app has Home, Log Fuel, and History screens; Log Fuel also accepts amount, litres, and odometer manually.
 
 ## Scope and limits
 
@@ -27,11 +27,13 @@ Expected model SHA-256: `60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df40883
 ## First car test
 
 1. Install the debug APK on the phone connected to Android Auto: `adb install -r app/build/outputs/apk/debug/app-debug.apk`.
-2. Open Saarthi on the phone and grant microphone permission. Test one typed command and one spoken command while parked.
+2. Open Saarthi on the phone and grant microphone permission. Test one manual entry and one spoken command while parked.
 3. Enable Android Auto developer mode and “Unknown sources” on the phone. Connect it to the car and open Saarthi on the car screen. If the app is hidden, the car host may reject its unsupported category.
 4. While parked, tap Speak and say the sample command. Check the saved entry on the phone. Record the transcript, elapsed time and any error for each failed attempt.
 
 Do the first tests while parked. The car UI uses a six-second capture and a brief spoken result; it has not had a driving distraction review.
+
+Do not run `connectedDebugAndroidTest` on a phone containing fuel logs you want to keep. The test runner may uninstall the app during cleanup, deleting its local database. Use an emulator for instrumented tests.
 
 ## Architecture
 
