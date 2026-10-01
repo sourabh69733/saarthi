@@ -6,10 +6,9 @@ import kotlinx.coroutines.withContext
 
 data class VoiceResult(val transcript: String, val message: String, val saved: Boolean)
 
-class FuelWorkflow(context: Context) {
+class FuelWorkflow(context: Context, private val whisper: WhisperEngine = WhisperEngine(context.applicationContext)) {
     private val appContext = context.applicationContext
     private val store = FuelStore(appContext)
-    private val whisper = WhisperEngine(appContext)
     private val parser = FuelCommandParser()
 
     suspend fun process(samples: FloatArray): VoiceResult = withContext(Dispatchers.IO) {

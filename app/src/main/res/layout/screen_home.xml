@@ -12,12 +12,12 @@
         android:paddingStart="24dp"
         android:paddingTop="20dp"
         android:paddingEnd="24dp"
-        android:paddingBottom="32dp">
+        android:paddingBottom="36dp">
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="YOUR FUEL COMPANION"
+            android:text="ONE TAP · OFFLINE VOICE"
             android:textColor="@color/accent"
             android:textSize="12sp"
             android:letterSpacing="0.12" />
@@ -27,14 +27,14 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
-            android:text="Every fill-up,\nremembered." />
+            android:text="Your voice,\nyour route." />
 
         <TextView
             style="@style/Text.Saarthi.Body"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
-            android:text="A simple fuel log that stays on your phone." />
+            android:text="Tap Speak while parked. Saarthi listens for six seconds, then requests an action on your phone." />
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -47,7 +47,7 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="QUICK LOG"
+                android:text="VOICE CONTROL"
                 android:textColor="#AEE4CC"
                 android:textSize="12sp"
                 android:letterSpacing="0.12" />
@@ -57,7 +57,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
                 android:fontFamily="sans-serif-medium"
-                android:text="Just say the numbers."
+                android:text="Say what you want to do."
                 android:textColor="@color/white"
                 android:textSize="25sp" />
 
@@ -65,63 +65,62 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="Amount, litres, and odometer — saved offline."
+                android:text="Open Maps · Navigate to a place · Play music"
                 android:textColor="#D6EDE2"
                 android:textSize="14sp" />
 
             <TextView
-                android:id="@+id/home_record"
+                android:id="@+id/home_speak"
+                android:tag="speak_button"
                 android:layout_width="match_parent"
-                android:layout_height="52dp"
+                android:layout_height="64dp"
                 android:layout_marginTop="24dp"
                 android:background="@drawable/bg_secondary"
+                android:contentDescription="Speak voice command"
+                android:focusable="true"
                 android:gravity="center"
-                android:text="Start voice log  →"
+                android:text="●  Speak"
                 android:textColor="@color/accent_dark"
-                android:textSize="16sp"
+                android:textSize="19sp"
                 android:fontFamily="sans-serif-medium" />
         </LinearLayout>
 
         <TextView
-            android:id="@+id/home_manual"
+            android:id="@+id/home_command_status"
+            style="@style/Text.Saarthi.Body"
             android:layout_width="match_parent"
-            android:layout_height="54dp"
-            android:layout_marginTop="14dp"
-            android:gravity="center"
-            android:text="Enter details manually  →"
-            android:textColor="@color/accent"
-            android:textSize="15sp"
-            android:fontFamily="sans-serif-medium" />
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:accessibilityLiveRegion="polite"
+            android:text="Ready. Try “open Google Maps”." />
+
+        <TextView
+            android:id="@+id/home_command_transcript"
+            style="@style/Text.Saarthi.Body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:visibility="gone" />
 
         <TextView
             style="@style/Text.Saarthi.Title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="28dp"
-            android:text="Latest fill-up" />
+            android:layout_marginTop="32dp"
+            android:text="Try saying" />
 
-        <LinearLayout
+        <TextView
+            style="@style/Text.Saarthi.Body"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:background="@drawable/bg_card"
-            android:orientation="vertical"
-            android:padding="20dp">
+            android:text="“Open Google Maps”\n“Navigate to Connaught Place”\n“Play Arijit Singh”" />
 
-            <TextView
-                android:id="@+id/home_latest_amount"
-                style="@style/Text.Saarthi.Title"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="No entries yet" />
-
-            <TextView
-                android:id="@+id/home_latest_detail"
-                style="@style/Text.Saarthi.Body"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="Your first fuel log will appear here." />
-        </LinearLayout>
+        <TextView
+            style="@style/Text.Saarthi.Body"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:text="Your words are processed on this phone. Maps or a music app may need internet access. An action request does not confirm playback or navigation started." />
     </LinearLayout>
 </ScrollView>
