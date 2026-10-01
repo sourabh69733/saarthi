@@ -19,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.text.NumberFormat
@@ -30,16 +31,25 @@ class MainActivity : Activity() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val currency = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("en-IN"))
+    private lateinit var whisper: WhisperEngine
     private lateinit var workflow: FuelWorkflow
+    private lateinit var commandWorkflow: VoiceCommandWorkflow
+    private lateinit var dispatcher: CommandDispatcher
     private lateinit var container: FrameLayout
     private var page = Page.HOME
     private var recording = false
     private var voiceStatus = "Ready when you are."
     private var voiceTranscript = ""
+    private var commandBusy = false
+    private var commandStatus = "Ready. Try “open Google Maps”."
+    private var commandTranscript = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        workflow = FuelWorkflow(this)
+        whisper = WhisperEngine(applicationContext)
+        workflow = FuelWorkflow(this, whisper)
+        commandWorkflow = VoiceCommandWorkflow({ samples -> whisper.transcribe(samples) }, VoiceCommandParser())
+        dispatcher = CommandDispatcher(this)
         setContentView(R.layout.activity_main)
         val root = findViewById<android.view.ViewGroup>(android.R.id.content).getChildAt(0)
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
@@ -53,11 +63,20 @@ class MainActivity : Activity() {
         findViewById<TextView>(R.id.nav_log).setOnClickListener { show(Page.LOG) }
         findViewById<TextView>(R.id.nav_history).setOnClickListener { show(Page.HISTORY) }
         page = savedInstanceState?.getString("page")?.let { runCatching { Page.valueOf(it) }.getOrNull() } ?: Page.HOME
+        commandStatus = savedInstanceState?.getString("commandStatus") ?: commandStatus
+        commandTranscript = savedInstanceState?.getString("commandTranscript") ?: commandTranscript
         show(page)
+        scope.launch {
+            FuelStore.saves.collect {
+                if (page == Page.HISTORY) show(Page.HISTORY)
+            }
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("page", page.name)
+        outState.putString("commandStatus", if (commandBusy) "Interrupted. Tap Speak to try again." else commandStatus)
+        outState.putString("commandTranscript", commandTranscript)
         super.onSaveInstanceState(outState)
     }
 
@@ -94,17 +113,8 @@ class MainActivity : Activity() {
     }
 
     private fun bindHome(screen: View) {
-        screen.findViewById<TextView>(R.id.home_record).setOnClickListener { show(Page.LOG) }
-        screen.findViewById<TextView>(R.id.home_manual).setOnClickListener { show(Page.LOG) }
-        scope.launch {
-            val latest = workflow.recent().firstOrNull()
-            if (page != Page.HOME || container.getChildAt(0) !== screen) return@launch
-            if (latest != null) {
-                screen.findViewById<TextView>(R.id.home_latest_amount).text = currency.format(latest.amountRupees)
-                screen.findViewById<TextView>(R.id.home_latest_detail).text =
-                    "${latest.litres} L  ·  ${latest.odometerKm} km  ·  ${date(latest.savedAtMs)}"
-            }
-        }
+        screen.findViewById<TextView>(R.id.home_speak).setOnClickListener { requestVoiceCommand() }
+        updateCommandUi()
     }
 
     private fun bindLog(screen: View) {
@@ -169,12 +179,65 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun requestVoiceCommand() {
+        if (commandBusy || recording) return
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 2)
+            return
+        }
+        commandBusy = true
+        commandStatus = "Listening for 6 seconds…"
+        commandTranscript = ""
+        updateCommandUi()
+        scope.launch {
+            try {
+                val samples = AudioCapture.phone()
+                commandStatus = "Transcribing offline…"
+                updateCommandUi()
+                val interpretation = commandWorkflow.interpret(samples)
+                commandTranscript = interpretation.transcript
+                val action = ExternalAction.forCommand(interpretation.command)
+                commandStatus = when {
+                    samples.isEmpty() -> "No audio heard. Tap Speak to try again."
+                    action == null -> "I couldn't match a command. Try opening Maps, navigating, or playing music."
+                    dispatcher.dispatch(action) == DispatchResult.Unavailable ->
+                        "No compatible app could accept that request. Nothing was started."
+                    else -> when (val command = interpretation.command) {
+                        VoiceCommand.OpenMaps -> "Requested Google Maps. Check the Maps app."
+                        is VoiceCommand.Navigate -> "Requested navigation to ${command.destination}. Check Maps."
+                        is VoiceCommand.PlayMusic -> "Requested music for ${command.query}. Check your music app."
+                        VoiceCommand.Unsupported -> "Command not supported."
+                    }
+                }
+            } catch (exception: Exception) {
+                commandStatus = exception.message ?: "Voice command failed. Tap Speak to try again."
+            } finally {
+                commandBusy = false
+                updateCommandUi()
+                updateVoiceUi()
+            }
+        }
+    }
+
+    private fun updateCommandUi() {
+        if (page != Page.HOME) return
+        val button = container.findViewById<TextView>(R.id.home_speak)
+        button.isEnabled = !commandBusy && !recording
+        button.alpha = if (button.isEnabled) 1f else 0.65f
+        button.text = if (commandBusy) "Listening / thinking…" else "●  Speak"
+        container.findViewById<TextView>(R.id.home_command_status).text = commandStatus
+        container.findViewById<TextView>(R.id.home_command_transcript).apply {
+            visibility = if (commandTranscript.isBlank()) View.GONE else View.VISIBLE
+            text = "Heard: $commandTranscript"
+        }
+    }
+
     private fun requestMicAndRecord() {
+        if (commandBusy || recording) return
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
             return
         }
-        if (recording) return
         recording = true
         voiceStatus = "Listening for 6 seconds…"
         voiceTranscript = ""
@@ -191,7 +254,8 @@ class MainActivity : Activity() {
                 voiceStatus = exception.message ?: "Recording failed. Try again."
             } finally {
                 recording = false
-                if (page == Page.LOG) updateVoiceUi() else show(page)
+                updateVoiceUi()
+                updateCommandUi()
             }
         }
     }
@@ -199,8 +263,8 @@ class MainActivity : Activity() {
     private fun updateVoiceUi() {
         if (page != Page.LOG) return
         val button = container.findViewById<TextView>(R.id.record_button)
-        button.isEnabled = !recording
-        button.alpha = if (recording) 0.65f else 1f
+        button.isEnabled = !recording && !commandBusy
+        button.alpha = if (button.isEnabled) 1f else 0.65f
         button.text = if (recording) "Recording…" else "Start 6-second recording"
         container.findViewById<TextView>(R.id.record_status).text = voiceStatus
         container.findViewById<TextView>(R.id.record_transcript).apply {
@@ -211,11 +275,22 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != 1) return
-        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) requestMicAndRecord()
-        else {
-            voiceStatus = "Microphone permission is needed for voice logging."
-            updateVoiceUi()
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            when (requestCode) {
+                1 -> requestMicAndRecord()
+                2 -> requestVoiceCommand()
+            }
+        } else {
+            when (requestCode) {
+                1 -> {
+                    voiceStatus = "Microphone permission is needed for voice logging."
+                    updateVoiceUi()
+                }
+                2 -> {
+                    commandStatus = "Microphone permission is needed for voice commands."
+                    updateCommandUi()
+                }
+            }
         }
     }
 
@@ -226,6 +301,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         scope.cancel()
+        CoroutineScope(Dispatchers.IO).launch { whisper.close() }
         super.onDestroy()
     }
 }
