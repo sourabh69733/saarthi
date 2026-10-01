@@ -4,6 +4,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 
 data class FuelEntry(
     val id: Long,
@@ -15,6 +17,11 @@ data class FuelEntry(
 )
 
 class FuelStore(context: Context) : SQLiteOpenHelper(context, "saarthi.db", null, 1) {
+    companion object {
+        private val savedEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+        val saves = savedEvents.asSharedFlow()
+    }
+
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""
             CREATE TABLE fuel_entries (
@@ -38,7 +45,9 @@ class FuelStore(context: Context) : SQLiteOpenHelper(context, "saarthi.db", null
             put("odometer_km", command.odometerKm)
             put("transcript", transcript)
         }
-        return writableDatabase.insertOrThrow("fuel_entries", null, values)
+        val id = writableDatabase.insertOrThrow("fuel_entries", null, values)
+        savedEvents.tryEmit(Unit)
+        return id
     }
 
     fun recent(limit: Int = 20): List<FuelEntry> {

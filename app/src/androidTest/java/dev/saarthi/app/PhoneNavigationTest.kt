@@ -14,6 +14,43 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PhoneNavigationTest {
+    @Test fun historyRefreshesWhenFuelIsSavedWhileVisible() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = instrumentation.startActivitySync(
+            Intent(instrumentation.targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        ) as MainActivity
+        try {
+            instrumentation.runOnMainSync {
+                activity.findViewById<View>(android.R.id.content).findViewWithTag<View>("history_nav").performClick()
+            }
+            instrumentation.waitForIdleSync()
+            val odometer = 8_000_000 + (System.currentTimeMillis() % 1_000_000).toInt()
+            fun visible(): Boolean {
+                var found = false
+                instrumentation.runOnMainSync {
+                    val entries = activity.findViewById<android.widget.LinearLayout>(R.id.history_list)
+                    found = entries != null && (0 until entries.childCount).any { index ->
+                        entries.getChildAt(index).findViewById<android.widget.TextView>(R.id.entry_detail)
+                            ?.text?.contains("$odometer km") == true
+                    }
+                }
+                return found
+            }
+            assertFalse("The new entry must not already be visible", visible())
+            FuelStore(instrumentation.targetContext).use {
+                it.save(FuelCommand(4321.67, 12.0, odometer), "Instrumentation refresh test")
+            }
+            val deadline = System.currentTimeMillis() + 2_000
+            while (!visible() && System.currentTimeMillis() < deadline) {
+                instrumentation.waitForIdleSync()
+                Thread.sleep(50)
+            }
+            assertTrue("History did not refresh after a fuel save", visible())
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+
     @Test fun voiceHomeHasSpeakAndFuelNavigation() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = instrumentation.startActivitySync(

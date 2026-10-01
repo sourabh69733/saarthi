@@ -30,4 +30,27 @@ class VoiceCommandParserTest {
             assertEquals("Unexpected action for '$spoken'", VoiceCommand.Unsupported, parser.parse(spoken))
         }
     }
+
+    @Test fun typographicApostropheNegationCannotLaunchAnAction() {
+        assertEquals(VoiceCommand.Unsupported, parser.parse("Play music. Don’t play it."))
+        assertEquals(VoiceCommand.Unsupported, parser.parse("don’t CP chalo"))
+    }
+
+    @Test fun explicitMusicPrefixWinsOverNavigationWordInTheQuery() {
+        assertEquals(VoiceCommand.PlayMusic("Chalo"), parser.parse("play Chalo"))
+    }
+
+    @Test fun punctuationOnlyIsNotAPlaceOrMusicQuery() {
+        for (spoken in listOf("navigate to ...", "play ...", "... chalo", "... bajao")) {
+            assertEquals(VoiceCommand.Unsupported, parser.parse(spoken))
+        }
+    }
+
+    @Test fun acceptsObservedMapsTranscriptionVariant() {
+        assertEquals(VoiceCommand.OpenMaps, parser.parse("Google max kholo"))
+    }
+
+    @Test fun acceptsObservedMusicTranscriptionVariant() {
+        assertEquals(VoiceCommand.PlayMusic("Arigit Singh"), parser.parse("Arigit Singh Bajau"))
+    }
 }

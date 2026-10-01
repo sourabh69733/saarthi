@@ -19,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.text.NumberFormat
@@ -65,6 +66,11 @@ class MainActivity : Activity() {
         commandStatus = savedInstanceState?.getString("commandStatus") ?: commandStatus
         commandTranscript = savedInstanceState?.getString("commandTranscript") ?: commandTranscript
         show(page)
+        scope.launch {
+            FuelStore.saves.collect {
+                if (page == Page.HISTORY) show(Page.HISTORY)
+            }
+        }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
